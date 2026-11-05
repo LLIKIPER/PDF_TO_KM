@@ -19,9 +19,13 @@ py -m pip install pymupdf numpy zxing-cpp openpyxl
 ## Результат выполнения скрипта
 
 ```result\DataMatrix.csv``` - КМ с криптохвостом, для использования в отчете о нанесении
+
 ```result\DataMatrix.txt``` - КМ с криптохвостом, для использования в печатной программа (идентичен ```result\DataMatrix.csv```)
+
 ```result\KM.xlsx``` - КМ без криптохвоста, для ввода в оборот
+
 ```result\details.csv``` - подробности распознавания
+
 ```result\report.txt``` - итоги распознавания
 
 
