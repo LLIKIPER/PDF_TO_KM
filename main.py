@@ -10,6 +10,8 @@ from pathlib import Path
 import pymupdf as fitz
 import numpy as np
 import zxingcpp
+from openpyxl import Workbook
+from openpyxl.cell import WriteOnlyCell
 
 ROOT = Path(__file__).resolve().parent
 IMPORT = ROOT / 'import'
@@ -177,10 +179,33 @@ def main():
                 for filename, page, _, issue in collected if issue]
     counts = Counter(row[3] for row in rows)
 
-    with (RESULT / 'codes.txt').open('wb') as out:
+    # Полные коды маркировки с криптохвостом. CSV намеренно побайтно
+    # идентичен TXT: один исходный код на строку, без преобразования GS (ASCII 29).
+    full_codes_path = RESULT / 'DataMatrix.txt'
+    with full_codes_path.open('wb') as out:
         for _, _, _, code in rows:
             out.write(code.encode('latin-1') + b'\n')
-    (RESULT / 'codes_readable.txt').unlink(missing_ok=True)  # Удалить файл от прежних запусков
+    (RESULT / 'DataMatrix.csv').write_bytes(full_codes_path.read_bytes())
+
+    # КМ без криптохвоста: криптохвост ЧЗ начинается с GS + AI 91.
+    # Сохраняем часть до этого разделителя; если маркера нет, оставляем код как есть.
+    def code_without_crypto_tail(code):
+        marker = GS + '91'
+        position = code.find(marker)
+        return code[:position] if position >= 0 else code
+
+    workbook = Workbook(write_only=True)
+    worksheet = workbook.create_sheet(title='КМ')
+    for _, _, _, code in rows:
+        cell_code = code_without_crypto_tail(code)
+        cell = WriteOnlyCell(worksheet, value=cell_code)
+        cell.number_format = '@'  # Не преобразовывать код в число и не терять нули
+        worksheet.append([cell])
+    workbook.save(RESULT / 'KM.xlsx')
+
+    # Удаляем устаревший файл от прежней версии скрипта.
+    (RESULT / 'codes.txt').unlink(missing_ok=True)
+    (RESULT / 'codes_readable.txt').unlink(missing_ok=True)
     with (RESULT / 'details.csv').open('w', encoding='utf-8-sig', newline='') as out:
         writer = csv.writer(out, delimiter=';')
         writer.writerow(['pdf', 'page', 'dpi', 'code_readable'])
