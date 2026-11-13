@@ -188,18 +188,20 @@ def main():
                 for filename, page, _, issue in collected if issue]
     counts = Counter(row[3] for row in rows)
 
-    # Полные коды маркировки с криптохвостом. CSV намеренно побайтно
-    # идентичен TXT: один исходный код на строку, без преобразования GS (ASCII 29).
+    # Полные коды с криптохвостом. Убираем только начальный GS (ASCII 29),
+    # если ZXing вернул его как первый символ. Внутренние GS, включая
+    # разделитель перед криптохвостом и GS внутри него, сохраняем.
+    # DataMatrix.csv намеренно побайтно идентичен DataMatrix.txt.
     full_codes_path = RESULT / 'DataMatrix.txt'
     with full_codes_path.open('wb') as out:
         for _, _, _, code in rows:
-            out.write(code.encode('latin-1') + b'\n')
+            output_code = code[1:] if code.startswith(GS) else code
+            out.write(output_code.encode('latin-1') + b'\n')
     (RESULT / 'DataMatrix.csv').write_bytes(full_codes_path.read_bytes())
 
-    # В некоторых кодах первый GS (ASCII 29) — обязательный начальный
-    # разделитель и должен остаться в полном DataMatrix.txt/CSV.
-    # Криптохвост начинается после следующего GS. Для KM.xlsx убираем
-    # начальный GS и всё начиная со второго GS.
+    # Для KM.xlsx убираем начальный GS (если он есть) и криптохвост,
+    # который начинается после следующего GS. В DataMatrix.txt/CSV
+    # начальный GS уже удалён, но здесь работаем с исходным code.
     def code_without_crypto_tail(code):
         if code.startswith(GS):
             payload = code[1:]
@@ -209,8 +211,8 @@ def main():
         return code[:position] if position >= 0 else code
 
     # Excel/XML запрещает ряд управляющих символов (включая GS, ASCII 29).
-    # Очищаем только значение для KM.xlsx; исходные коды в DataMatrix.txt/CSV
-    # остаются без изменений.
+    # Очищаем только значение для KM.xlsx; внутренние GS в файлах
+    # DataMatrix.txt/CSV сохраняются.
     excel_illegal_chars = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F]')
 
     workbook = Workbook(write_only=True)
