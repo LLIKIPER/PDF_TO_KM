@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 import signal
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
@@ -35,6 +36,14 @@ def decode(page, dpi):
             code = bytes(raw).decode('latin-1')
         else:
             code = symbol.text
+
+        # GS1 DataMatrix begins with FNC1. ZXing may expose this as the
+        # symbology identifier ]d2 rather than include ASCII GS (0x1D)
+        # in symbol.bytes. Restore the leading GS in the full payload.
+        symbology_id = getattr(symbol, 'symbology_identifier', '') or ''
+        if code and str(symbology_id).startswith(']d2') and not code.startswith(GS):
+            code = GS + code
+
         if code:
             found.add(code)
     return found
@@ -187,17 +196,28 @@ def main():
             out.write(code.encode('latin-1') + b'\n')
     (RESULT / 'DataMatrix.csv').write_bytes(full_codes_path.read_bytes())
 
-    # КМ без криптохвоста: криптохвост ЧЗ начинается с GS + AI 91.
-    # Сохраняем часть до этого разделителя; если маркера нет, оставляем код как есть.
+    # В некоторых кодах первый GS (ASCII 29) — обязательный начальный
+    # разделитель и должен остаться в полном DataMatrix.txt/CSV.
+    # Криптохвост начинается после следующего GS. Для KM.xlsx убираем
+    # начальный GS и всё начиная со второго GS.
     def code_without_crypto_tail(code):
-        marker = GS + '91'
-        position = code.find(marker)
+        if code.startswith(GS):
+            payload = code[1:]
+            position = payload.find(GS)
+            return payload[:position] if position >= 0 else payload
+        position = code.find(GS)
         return code[:position] if position >= 0 else code
+
+    # Excel/XML запрещает ряд управляющих символов (включая GS, ASCII 29).
+    # Очищаем только значение для KM.xlsx; исходные коды в DataMatrix.txt/CSV
+    # остаются без изменений.
+    excel_illegal_chars = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F]')
 
     workbook = Workbook(write_only=True)
     worksheet = workbook.create_sheet(title='КМ')
     for _, _, _, code in rows:
         cell_code = code_without_crypto_tail(code)
+        cell_code = excel_illegal_chars.sub('', cell_code)
         cell = WriteOnlyCell(worksheet, value=cell_code)
         cell.number_format = '@'  # Не преобразовывать код в число и не терять нули
         worksheet.append([cell])
