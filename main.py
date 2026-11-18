@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import csv
 import os
 import re
@@ -104,10 +105,23 @@ def stop_pool(pool, futures):
     pool.shutdown(wait=False, cancel_futures=True)
 
 
-def main():
-    for folder in (IMPORT, RESULT):
-        folder.mkdir(exist_ok=True)
-    pdfs = sorted(IMPORT.glob('*.pdf'))
+def main(source_dir: Path | None = None):
+    # Без аргумента используем прежние import/result каталоги.
+    # Если каталог передан параметром, читаем PDF из него и сохраняем
+    # все результаты непосредственно рядом с исходными PDF.
+    if source_dir is None:
+        input_dir = IMPORT
+        output_dir = RESULT
+        input_dir.mkdir(exist_ok=True)
+        output_dir.mkdir(exist_ok=True)
+    else:
+        input_dir = source_dir.expanduser().resolve()
+        if not input_dir.exists() or not input_dir.is_dir():
+            print(f'Указанный каталог не существует или не является папкой: {input_dir}')
+            return
+        output_dir = input_dir
+
+    pdfs = sorted(input_dir.glob('*.pdf'))
     if not pdfs:
         print('Нет PDF в папке import')
         return
@@ -192,12 +206,12 @@ def main():
     # если ZXing вернул его как первый символ. Внутренние GS, включая
     # разделитель перед криптохвостом и GS внутри него, сохраняем.
     # DataMatrix.csv намеренно побайтно идентичен DataMatrix.txt.
-    full_codes_path = RESULT / 'DataMatrix.txt'
+    full_codes_path = output_dir / 'DataMatrix.txt'
     with full_codes_path.open('wb') as out:
         for _, _, _, code in rows:
             output_code = code[1:] if code.startswith(GS) else code
             out.write(output_code.encode('latin-1') + b'\n')
-    (RESULT / 'DataMatrix.csv').write_bytes(full_codes_path.read_bytes())
+    (output_dir / 'DataMatrix.csv').write_bytes(full_codes_path.read_bytes())
 
     # Для KM.xlsx убираем начальный GS (если он есть) и криптохвост,
     # который начинается после следующего GS. В DataMatrix.txt/CSV
@@ -223,12 +237,12 @@ def main():
         cell = WriteOnlyCell(worksheet, value=cell_code)
         cell.number_format = '@'  # Не преобразовывать код в число и не терять нули
         worksheet.append([cell])
-    workbook.save(RESULT / 'KM.xlsx')
+    workbook.save(output_dir / 'KM.xlsx')
 
     # Удаляем устаревший файл от прежней версии скрипта.
-    (RESULT / 'codes.txt').unlink(missing_ok=True)
-    (RESULT / 'codes_readable.txt').unlink(missing_ok=True)
-    with (RESULT / 'details.csv').open('w', encoding='utf-8-sig', newline='') as out:
+    (output_dir / 'codes.txt').unlink(missing_ok=True)
+    (output_dir / 'codes_readable.txt').unlink(missing_ok=True)
+    with (output_dir / 'details.csv').open('w', encoding='utf-8-sig', newline='') as out:
         writer = csv.writer(out, delimiter=';')
         writer.writerow(['pdf', 'page', 'dpi', 'code_readable'])
         for filename, page, dpi, code in rows:
@@ -243,7 +257,7 @@ def main():
         '', 'Проблемные страницы:',
         *(f'{filename}, стр. {page}: {issue}' for filename, page, issue in problems),
     ]
-    (RESULT / 'report.txt').write_text('\n'.join(report) + '\n', encoding='utf-8')
+    (output_dir / 'report.txt').write_text('\n'.join(report) + '\n', encoding='utf-8')
     print('\n'.join(report[:5]))
 
 
@@ -251,7 +265,16 @@ if __name__ == '__main__':
     signal.signal(signal.SIGINT, stop_signal)
     if hasattr(signal, 'SIGBREAK'):
         signal.signal(signal.SIGBREAK, stop_signal)
+    parser = argparse.ArgumentParser(
+        description='Распознавание DataMatrix из PDF Честного ЗНАКа.'
+    )
+    parser.add_argument(
+        'directory', nargs='?',
+        help='Каталог с PDF. Результаты будут сохранены в этом же каталоге. '
+             'Если не указан, используются папки import и result рядом со скриптом.'
+    )
+    args = parser.parse_args()
     try:
-        main()
+        main(Path(args.directory) if args.directory else None)
     except KeyboardInterrupt:
         print('\nСкрипт прерван пользователем.')
